@@ -44,7 +44,14 @@ let foodBorn = 0;
 let goldenBorn = 0;
 let toastTimer = 0;
 
+const ARM_MS = 520;
 const padDirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+const padByName = {};
+const heldDirs = new Set();
+
+let arming = false;
+let armTimer = 0;
+let pendingDir = null;
 
 function loadBest() {
   try {
@@ -146,8 +153,55 @@ function showToast(text) {
   }, 1600);
 }
 
+function dirName(x, y) {
+  if (y === -1) return "up";
+  if (y === 1) return "down";
+  if (x === -1) return "left";
+  if (x === 1) return "right";
+  return "";
+}
+
+function holdDir(name) {
+  const button = padByName[name];
+  if (!button) return;
+  heldDirs.add(name);
+  button.classList.add("lit");
+  button.setAttribute("aria-pressed", "true");
+}
+
+function releaseDir(name) {
+  const button = padByName[name];
+  heldDirs.delete(name);
+  if (!button) return;
+  window.setTimeout(() => {
+    if (heldDirs.has(name)) return;
+    button.classList.remove("lit");
+    button.setAttribute("aria-pressed", "false");
+  }, 120);
+}
+
+function blipDir(name) {
+  const button = padByName[name];
+  if (!button) return;
+  button.classList.add("lit");
+  button.setAttribute("aria-pressed", "true");
+  window.setTimeout(() => {
+    if (heldDirs.has(name)) return;
+    button.classList.remove("lit");
+    button.setAttribute("aria-pressed", "false");
+  }, 160);
+}
+
+function heldDirection() {
+  if (heldDirs.size !== 1) return null;
+  const name = heldDirs.values().next().value;
+  const dir = padDirs[name];
+  return dir ? [dir[0], dir[1]] : null;
+}
+
 function begin(force) {
   unlockAudio();
+  if (arming) return;
   if (!force && state.status === "paused") {
     resume(state);
     last = 0;
@@ -155,6 +209,40 @@ function begin(force) {
     say("繼續");
     return;
   }
+  armStart();
+}
+
+function armStart() {
+  arming = true;
+  if (overlay.hidden) showOverlay("Snakes", "方向鍵或 WASD 移動。", "開始");
+  board.classList.add("arming");
+  actionBtn.classList.add("arming");
+  actionBtn.disabled = true;
+  actionBtn.setAttribute("aria-busy", "true");
+  window.clearTimeout(armTimer);
+  armTimer = window.setTimeout(finishArm, ARM_MS);
+}
+
+function cancelArm() {
+  if (!arming) return;
+  arming = false;
+  pendingDir = null;
+  window.clearTimeout(armTimer);
+  board.classList.remove("arming");
+  actionBtn.classList.remove("arming");
+  actionBtn.disabled = false;
+  actionBtn.removeAttribute("aria-busy");
+}
+
+function finishArm() {
+  if (!arming) return;
+  const dir = pendingDir || heldDirection();
+  pendingDir = null;
+  arming = false;
+  board.classList.remove("arming");
+  actionBtn.classList.remove("arming");
+  actionBtn.disabled = false;
+  actionBtn.removeAttribute("aria-busy");
   restart(state);
   acc = 0;
   particles.length = 0;
@@ -165,9 +253,11 @@ function begin(force) {
   noteScore(false);
   blipStart();
   say("遊戲開始");
+  if (dir) queueDir(state, dir[0], dir[1]);
 }
 
 function onSpace() {
+  if (arming) return;
   if (state.status === "playing") {
     pause(state);
     showOverlay("暫停", "空白鍵繼續，R 重新開始。", "繼續");
@@ -181,10 +271,21 @@ function onSpace() {
   begin(true);
 }
 
-function pressDir(x, y) {
+function pressDir(x, y, hold) {
   unlockAudio();
-  if (state.status === "ready" || state.status === "dead" || state.status === "won") begin(true);
-  if (state.status === "playing" || state.status === "paused") queueDir(state, x, y);
+  const name = dirName(x, y);
+  if (hold) holdDir(name);
+  else blipDir(name);
+  if (arming) {
+    pendingDir = [x, y];
+    return;
+  }
+  if (state.status === "playing" || state.status === "paused") {
+    queueDir(state, x, y);
+    return;
+  }
+  pendingDir = [x, y];
+  begin(true);
 }
 
 function handleEvent(result) {
@@ -231,7 +332,7 @@ function frame(now) {
   last = now;
   if (delta > 100) delta = 100;
 
-  if (state.status === "playing") {
+  if (state.status === "playing" && !arming) {
     acc += delta;
     while (acc >= state.tickMs && state.status === "playing") {
       const before = state.tickMs;
@@ -581,17 +682,18 @@ canvas.addEventListener("touchend", (event) => {
     if (state.status !== "playing" && state.status !== "paused") begin(true);
     return;
   }
-  if (Math.abs(dx) > Math.abs(dy)) pressDir(dx > 0 ? 1 : -1, 0);
-  else pressDir(0, dy > 0 ? 1 : -1);
+  if (Math.abs(dx) > Math.abs(dy)) pressDir(dx > 0 ? 1 : -1, 0, false);
+  else pressDir(0, dy > 0 ? 1 : -1, false);
 }, { passive: true });
 
 window.addEventListener("keydown", (event) => {
   if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.target === muteBtn || event.target.closest?.(".pad")) return;
+  if (event.target === muteBtn) return;
+  if (event.target.closest?.(".pad") && (event.code === "Space" || event.code === "Enter")) return;
   const dir = DIRS[event.code];
   if (dir) {
     event.preventDefault();
-    pressDir(dir[0], dir[1]);
+    pressDir(dir[0], dir[1], true);
     return;
   }
   if (event.code === "Space") {
@@ -614,6 +716,16 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
+window.addEventListener("keyup", (event) => {
+  const dir = DIRS[event.code];
+  if (!dir) return;
+  releaseDir(dirName(dir[0], dir[1]));
+});
+
+window.addEventListener("blur", () => {
+  for (const name of [...heldDirs]) releaseDir(name);
+});
+
 actionBtn.addEventListener("click", () => begin(false));
 overlay.addEventListener("pointerdown", (event) => {
   if (event.target.closest("button")) return;
@@ -623,20 +735,31 @@ overlay.addEventListener("pointerdown", (event) => {
 muteBtn.addEventListener("click", toggleMute);
 
 for (const button of document.querySelectorAll(".pad button")) {
+  padByName[button.dataset.dir] = button;
   const go = (event) => {
     event.preventDefault();
     const dir = padDirs[button.dataset.dir];
-    pressDir(dir[0], dir[1]);
+    pressDir(dir[0], dir[1], true);
   };
-  button.addEventListener("pointerdown", go);
+  button.addEventListener("pointerdown", (event) => {
+    button.setPointerCapture?.(event.pointerId);
+    go(event);
+  });
+  button.addEventListener("pointerup", () => releaseDir(button.dataset.dir));
+  button.addEventListener("pointercancel", () => releaseDir(button.dataset.dir));
   button.addEventListener("keydown", (event) => {
     if (event.code === "Enter" || event.code === "Space") go(event);
+  });
+  button.addEventListener("keyup", (event) => {
+    if (event.code === "Enter" || event.code === "Space") releaseDir(button.dataset.dir);
   });
 }
 
 document.addEventListener("visibilitychange", () => {
   last = 0;
-  if (document.hidden && state.status === "playing") {
+  if (!document.hidden) return;
+  if (arming) cancelArm();
+  if (state.status === "playing") {
     pause(state);
     showOverlay("暫停", "回來之後按空白鍵繼續。", "繼續");
     say("暫停");
