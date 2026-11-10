@@ -2,6 +2,7 @@ import { COLS, ROWS, createState, pause, queueDir, restart, resume, step } from 
 
 const BEST_KEY = "snakes.best";
 const MUTE_KEY = "snakes.muted";
+const THEME_KEY = "snakes.theme";
 const DIRS = {
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
@@ -25,6 +26,9 @@ const bestEl = document.getElementById("best");
 const bestStat = document.getElementById("best-stat");
 const lengthEl = document.getElementById("length");
 const muteBtn = document.getElementById("mute");
+const themeBtn = document.getElementById("theme");
+const tagline = document.getElementById("tagline");
+const themeMeta = document.querySelector('meta[name="theme-color"]');
 const toast = document.getElementById("toast");
 const live = document.getElementById("live");
 
@@ -36,6 +40,7 @@ const view = { w: 640, h: 640, cell: 28, ox: 16, oy: 16, dpr: 1 };
 let best = loadBest();
 let bestSnapshot = best;
 let muted = loadMuted();
+let dark = loadDark();
 let audioCtx = null;
 let acc = 0;
 let last = 0;
@@ -68,6 +73,35 @@ function loadMuted() {
   } catch {
     return false;
   }
+}
+
+function loadDark() {
+  try {
+    return localStorage.getItem(THEME_KEY) !== "light";
+  } catch {
+    return true;
+  }
+}
+
+function palette() {
+  if (dark) {
+    return {
+      board: "#0e1f16",
+      cellA: "rgba(214, 242, 180, 0.045)",
+      cellB: "rgba(0, 0, 0, 0.16)",
+      head: "#d6ff6b",
+      tail: "#146b3a",
+      glow: "rgba(214, 255, 107, 0.45)",
+    };
+  }
+  return {
+    board: "#e7f3dc",
+    cellA: "rgba(80, 130, 50, 0.09)",
+    cellB: "rgba(255, 255, 255, 0.72)",
+    head: "#6eae22",
+    tail: "#1d6b38",
+    glow: "rgba(90, 150, 30, 0.35)",
+  };
 }
 
 function save(key, value) {
@@ -124,6 +158,21 @@ function noteScore(pop) {
 function renderMute() {
   muteBtn.textContent = muted ? "音效關" : "音效開";
   muteBtn.setAttribute("aria-label", muted ? "打開音效" : "關閉音效");
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  if (themeMeta) themeMeta.content = dark ? "#08110c" : "#f4f7ec";
+  themeBtn.textContent = dark ? "深色開" : "深色關";
+  themeBtn.setAttribute("aria-pressed", dark ? "true" : "false");
+  themeBtn.setAttribute("aria-label", dark ? "關閉深色模式" : "打開深色模式");
+  tagline.textContent = dark ? "夜裡的果園" : "白天的果園";
+}
+
+function toggleTheme() {
+  dark = !dark;
+  save(THEME_KEY, dark ? "dark" : "light");
+  applyTheme();
 }
 
 function toggleMute() {
@@ -355,7 +404,7 @@ function frame(now) {
 function draw(now, t) {
   ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
   ctx.clearRect(0, 0, view.w, view.h);
-  ctx.fillStyle = "#0e1f16";
+  ctx.fillStyle = palette().board;
   ctx.fillRect(0, 0, view.w, view.h);
 
   const shake = !reduced && state.status === "dead" ? Math.max(0, 1 - (now - deadAt) / 360) : 0;
@@ -387,7 +436,8 @@ function popScale(now, born) {
 function drawBoard() {
   for (let y = 0; y < ROWS; y += 1) {
     for (let x = 0; x < COLS; x += 1) {
-      ctx.fillStyle = (x + y) % 2 === 0 ? "rgba(214, 242, 180, 0.045)" : "rgba(0, 0, 0, 0.16)";
+      const colors = palette();
+      ctx.fillStyle = (x + y) % 2 === 0 ? colors.cellA : colors.cellB;
       const m = view.cell * 0.08;
       roundRect(
         view.ox + x * view.cell + m,
@@ -441,11 +491,12 @@ function drawSnake(t, now) {
   ctx.lineCap = "round";
   for (let i = pts.length - 1; i >= 0; i -= 1) {
     const taper = pts.length === 1 ? 0 : i / (pts.length - 1);
-    const color = mix("#d6ff6b", "#146b3a", Math.pow(taper, 0.85));
+    const colors = palette();
+    const color = mix(colors.head, colors.tail, Math.pow(taper, 0.85));
     const rad = radiusAt(i);
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.shadowColor = i === 0 ? "rgba(214, 255, 107, 0.45)" : "transparent";
+    ctx.shadowColor = i === 0 ? colors.glow : "transparent";
     ctx.shadowBlur = i === 0 ? 14 : 0;
     if (i < pts.length - 1) {
       ctx.lineWidth = rad + radiusAt(i + 1);
@@ -688,7 +739,7 @@ canvas.addEventListener("touchend", (event) => {
 
 window.addEventListener("keydown", (event) => {
   if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.target === muteBtn) return;
+  if (event.target === muteBtn || event.target === themeBtn) return;
   if (event.target.closest?.(".pad") && (event.code === "Space" || event.code === "Enter")) return;
   const dir = DIRS[event.code];
   if (dir) {
@@ -733,6 +784,7 @@ overlay.addEventListener("pointerdown", (event) => {
   begin(false);
 });
 muteBtn.addEventListener("click", toggleMute);
+themeBtn.addEventListener("click", toggleTheme);
 
 for (const button of document.querySelectorAll(".pad button")) {
   padByName[button.dataset.dir] = button;
@@ -769,5 +821,6 @@ document.addEventListener("visibilitychange", () => {
 new ResizeObserver(() => resize()).observe(board);
 resize();
 renderMute();
+applyTheme();
 noteScore(false);
 requestAnimationFrame(frame);

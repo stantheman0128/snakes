@@ -4,6 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#08110c">
+  <script>
+    try {
+      if (localStorage.getItem("snakes.theme") === "light") {
+        document.documentElement.dataset.theme = "light";
+      }
+    } catch (error) {
+      /* private mode */
+    }
+  </script>
   <meta name="description" content="Snakes — 在瀏覽器裡玩的貪吃蛇。吃蘋果、躲牆壁、別咬到自己。">
   <title>Snakes</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -20,14 +29,15 @@
           <path d="M36 10.5c1.6-2.4 4.2-2.6 5.4-.8" fill="none" stroke="#8be06a" stroke-width="2" stroke-linecap="round"/>
         </svg>
         <div>
-          <h1>Snakes <span class="version">v1.2</span></h1>
-          <p>夜裡的果園</p>
+          <h1>Snakes <span class="version">v1.3</span></h1>
+          <p id="tagline">夜裡的果園</p>
         </div>
       </div>
       <div class="stats">
         <div class="stat"><span>分數</span><strong id="score">0</strong></div>
         <div class="stat" id="best-stat"><span>最佳</span><strong id="best">0</strong></div>
         <div class="stat"><span>長度</span><strong id="length">3</strong></div>
+        <button id="theme" type="button" aria-pressed="true">深色開</button>
         <button id="mute" type="button">音效開</button>
       </div>
     </header>
